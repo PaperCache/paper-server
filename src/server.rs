@@ -6,50 +6,41 @@
  */
 
 use std::{
+	io::Write,
+	net::{Shutdown, TcpListener, TcpStream},
+	str::FromStr,
 	sync::{
 		Arc,
 		atomic::{AtomicUsize, Ordering},
 	},
-	io::Write,
-	str::FromStr,
-	net::{TcpListener, TcpStream, Shutdown},
 };
 
-use log::{info, warn, error};
 use kwik::thread_pool::ThreadPool;
-use paper_cache::{PaperCache, PaperPolicy, CacheError};
-
+use log::{error, info, warn};
+use paper_cache::{CacheError, PaperCache, PaperPolicy};
 use paper_utils::{
-	stream::Buffer,
 	sheet::{Sheet, SheetBuilder},
+	stream::Buffer,
 };
 
-use crate::{
-	error::ServerError,
-	command::Command,
-	connection::Connection,
-	config::Config,
-};
+use crate::{command::Command, config::Config, connection::Connection, error::ServerError};
 
 pub type Cache = PaperCache<Buffer, Buffer>;
 type SheetResult = Result<Sheet, ServerError>;
 
 pub struct Server {
 	listener: TcpListener,
-	cache: Arc<Cache>,
+	cache:    Arc<Cache>,
 
 	pool: ThreadPool,
 
 	max_connections: usize,
 	num_connections: Arc<AtomicUsize>,
-	auth_token: Option<u64>,
+	auth_token:      Option<u64>,
 }
 
 impl Server {
-	pub fn new(
-		config: &Config,
-		cache: Cache,
-	) -> Result<Self, ServerError> {
+	pub fn new(config: &Config, cache: Cache) -> Result<Self, ServerError> {
 		let addr = format!("{}:{}", config.host(), config.port());
 
 		let Ok(listener) = TcpListener::bind(addr) else {
@@ -159,9 +150,7 @@ impl Server {
 }
 
 fn success_handshake(stream: &mut TcpStream) -> Result<(), ServerError> {
-	let sheet = SheetBuilder::new()
-		.write_bool(true)
-		.into_sheet();
+	let sheet = SheetBuilder::new().write_bool(true).into_sheet();
 
 	stream
 		.write_all(sheet.serialize())
@@ -195,16 +184,14 @@ fn handle_version(cache: &Arc<Cache>) -> SheetResult {
 }
 
 fn handle_auth(connection: &mut Connection, token: &Buffer) -> SheetResult {
-	let is_authorized = String::from_utf8(token.to_vec())
-		.is_ok_and(|token| connection.authorize(&token));
+	let is_authorized =
+		String::from_utf8(token.to_vec()).is_ok_and(|token| connection.authorize(&token));
 
 	if !is_authorized {
 		return Err(ServerError::Unauthorized);
 	}
 
-	let sheet = SheetBuilder::new()
-		.write_bool(true)
-		.into_sheet();
+	let sheet = SheetBuilder::new().write_bool(true).into_sheet();
 
 	Ok(sheet)
 }
@@ -212,39 +199,26 @@ fn handle_auth(connection: &mut Connection, token: &Buffer) -> SheetResult {
 fn handle_get(cache: &Arc<Cache>, key: Buffer) -> SheetResult {
 	cache
 		.get(&key)
-		.map(|object|
+		.map(|object| {
 			SheetBuilder::new()
 				.write_bool(true)
 				.write_buf(&object)
-				.into_sheet(),
-		)
+				.into_sheet()
+		})
 		.map_err(ServerError::CacheError)
 }
 
-fn handle_set(
-	cache: &Arc<Cache>,
-	key: Buffer,
-	value: Buffer,
-	ttl: Option<u32>,
-) -> SheetResult {
+fn handle_set(cache: &Arc<Cache>, key: Buffer, value: Buffer, ttl: Option<u32>) -> SheetResult {
 	cache
 		.set(key, value, ttl)
-		.map(|_|
-			SheetBuilder::new()
-				.write_bool(true)
-				.into_sheet()
-		)
+		.map(|_| SheetBuilder::new().write_bool(true).into_sheet())
 		.map_err(ServerError::CacheError)
 }
 
 fn handle_del(cache: &Arc<Cache>, key: Buffer) -> SheetResult {
 	cache
 		.del(&key)
-		.map(|_|
-			SheetBuilder::new()
-				.write_bool(true)
-				.into_sheet()
-		)
+		.map(|_| SheetBuilder::new().write_bool(true).into_sheet())
 		.map_err(ServerError::CacheError)
 }
 
@@ -260,74 +234,56 @@ fn handle_has(cache: &Arc<Cache>, key: Buffer) -> SheetResult {
 fn handle_peek(cache: &Arc<Cache>, key: Buffer) -> SheetResult {
 	cache
 		.peek(&key)
-		.map(|object|
+		.map(|object| {
 			SheetBuilder::new()
 				.write_bool(true)
 				.write_buf(&object)
 				.into_sheet()
-		)
+		})
 		.map_err(ServerError::CacheError)
 }
 
 fn handle_ttl(cache: &Arc<Cache>, key: Buffer, ttl: Option<u32>) -> SheetResult {
 	cache
 		.ttl(&key, ttl)
-		.map(|_|
-			SheetBuilder::new()
-				.write_bool(true)
-				.into_sheet()
-		)
+		.map(|_| SheetBuilder::new().write_bool(true).into_sheet())
 		.map_err(ServerError::CacheError)
 }
 
 fn handle_size(cache: &Arc<Cache>, key: Buffer) -> SheetResult {
 	cache
 		.size(&key)
-		.map(|size|
+		.map(|size| {
 			SheetBuilder::new()
 				.write_bool(true)
 				.write_u32(size)
 				.into_sheet()
-		)
+		})
 		.map_err(ServerError::CacheError)
 }
 
 fn handle_wipe(cache: &Arc<Cache>) -> SheetResult {
 	cache
 		.wipe()
-		.map(|_|
-			SheetBuilder::new()
-				.write_bool(true)
-				.into_sheet()
-		)
+		.map(|_| SheetBuilder::new().write_bool(true).into_sheet())
 		.map_err(ServerError::CacheError)
 }
 
 fn handle_resize(cache: &Arc<Cache>, size: u64) -> SheetResult {
 	cache
 		.resize(size)
-		.map(|_|
-			SheetBuilder::new()
-				.write_bool(true)
-				.into_sheet()
-		)
+		.map(|_| SheetBuilder::new().write_bool(true).into_sheet())
 		.map_err(ServerError::CacheError)
 }
 
 fn handle_policy(cache: &Arc<Cache>, policy_str: String) -> SheetResult {
 	let Ok(policy) = PaperPolicy::from_str(&policy_str) else {
-		return Err(ServerError::CacheError(
-			CacheError::InvalidPolicy
-		));
+		return Err(ServerError::CacheError(CacheError::InvalidPolicy));
 	};
 
 	cache
 		.policy(policy)
-		.map(|_|
-			SheetBuilder::new()
-				.write_bool(true)
-				.into_sheet()
-		)
+		.map(|_| SheetBuilder::new().write_bool(true).into_sheet())
 		.map_err(ServerError::CacheError)
 }
 

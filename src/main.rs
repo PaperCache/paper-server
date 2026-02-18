@@ -5,24 +5,24 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-mod logo;
-mod error;
 mod command;
-mod server;
-mod connection;
 mod config;
+mod connection;
+mod error;
+mod logo;
+mod server;
 
 use std::path::{Path, PathBuf};
+
 use clap::Parser;
 use dotenv::dotenv;
 use log::error;
-
 #[cfg(not(target_env = "msvc"))]
 use tikv_jemallocator::Jemalloc;
 
 use crate::{
-	server::{Server, Cache},
 	config::Config,
+	server::{Cache, Server},
 };
 
 #[cfg(not(target_env = "msvc"))]
@@ -60,11 +60,8 @@ fn main() {
 		None => Config::default(),
 	};
 
-	let cache = Cache::new(
-		config.max_size(),
-		config.policies(),
-		config.policy(),
-	).expect("Could not configure cache");
+	let cache = Cache::new(config.max_size(), config.policies(), config.policy())
+		.expect("Could not configure cache");
 
 	let cache_version = cache.version();
 
@@ -91,8 +88,7 @@ where
 {
 	match maybe_path {
 		Some(path) => {
-			log4rs::init_file(path, Default::default())
-				.expect("Could not initialize log4rs");
+			log4rs::init_file(path, Default::default()).expect("Could not initialize log4rs");
 		},
 
 		None => {
@@ -100,8 +96,7 @@ where
 			let config = serde_yaml::from_str::<log4rs::config::RawConfig>(config_str)
 				.expect("Invalid log config");
 
-			log4rs::init_raw_config(config)
-				.expect("Could not initialize log4rs");
-		}
+			log4rs::init_raw_config(config).expect("Could not initialize log4rs");
+		},
 	}
 }

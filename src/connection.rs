@@ -6,30 +6,24 @@
  */
 
 use std::{
-	io::Write,
 	hash::{DefaultHasher, Hash, Hasher},
+	io::Write,
 	net::TcpStream,
 };
 
 use paper_utils::stream::StreamError;
 
-use crate::{
-	error::ServerError,
-	command::Command,
-};
+use crate::{command::Command, error::ServerError};
 
 pub struct Connection {
 	stream: TcpStream,
 
-	auth_token: Option<u64>,
+	auth_token:    Option<u64>,
 	is_authorized: bool,
 }
 
 impl Connection {
-	pub fn new(
-		stream: TcpStream,
-		auth_token: Option<u64>,
-	) -> Self {
+	pub fn new(stream: TcpStream, auth_token: Option<u64>) -> Self {
 		let is_authorized = auth_token.is_none();
 
 		Connection {
@@ -52,7 +46,8 @@ impl Connection {
 		let mut s = DefaultHasher::new();
 		value.hash(&mut s);
 
-		self.is_authorized = self.auth_token
+		self.is_authorized = self
+			.auth_token
 			.is_some_and(|token| token == s.finish());
 
 		self.is_authorized
@@ -60,8 +55,7 @@ impl Connection {
 
 	pub fn get_command(&mut self) -> Result<Command, ServerError> {
 		Command::from_stream(&mut self.stream).map_err(|err| match err {
-			StreamError::InvalidStream | StreamError::ClosedStream
-				=> ServerError::Disconnected,
+			StreamError::InvalidStream | StreamError::ClosedStream => ServerError::Disconnected,
 
 			_ => ServerError::InvalidCommand(err.to_string()),
 		})

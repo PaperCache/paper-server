@@ -8,8 +8,8 @@
 use std::net::TcpStream;
 
 use paper_utils::{
-	stream::{Buffer, StreamReader, StreamError},
 	command::CommandByte,
+	stream::{Buffer, StreamError, StreamReader},
 };
 
 pub enum Command {

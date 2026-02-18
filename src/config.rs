@@ -7,20 +7,16 @@
 
 use std::{
 	env,
-	include_str,
-	str::FromStr,
-	path::Path,
 	hash::{DefaultHasher, Hash, Hasher},
+	include_str,
+	path::Path,
+	str::FromStr,
 };
 
+use kwik::file::{FileReader, text::TextReader};
+use paper_cache::PaperPolicy;
 use parse_size::parse_size;
 
-use kwik::file::{
-	FileReader,
-	text::TextReader,
-};
-
-use paper_cache::PaperPolicy;
 use crate::error::ServerError;
 
 #[derive(Debug)]
@@ -30,10 +26,10 @@ pub struct Config {
 
 	max_size: u64,
 	policies: Vec<PaperPolicy>,
-	policy: PaperPolicy,
+	policy:   PaperPolicy,
 
 	max_connections: usize,
-	auth_token: Option<u64>,
+	auth_token:      Option<u64>,
 }
 
 enum ConfigValue {
@@ -107,8 +103,7 @@ impl Config {
 			return Err(ServerError::InvalidConfigLine(line.into()));
 		}
 
-		let token_value = try_parse_env(tokens[1])
-			.unwrap_or(tokens[1].into());
+		let token_value = try_parse_env(tokens[1]).unwrap_or(tokens[1].into());
 
 		let config_value = match tokens[0] {
 			"host" => parse_host(&token_value),
@@ -133,7 +128,9 @@ impl Config {
 				ConfigValue::PoliciesItem(policy) => config.policies.push(policy),
 				ConfigValue::Policy(policy) => config.policy = policy,
 
-				ConfigValue::MaxConnections(max_connections) => config.max_connections = max_connections,
+				ConfigValue::MaxConnections(max_connections) => {
+					config.max_connections = max_connections
+				},
 				ConfigValue::AuthToken(token) => config.auth_token = Some(token),
 			},
 
@@ -170,10 +167,10 @@ fn init_uninitialized_config() -> Config {
 
 		max_size: 0,
 		policies: Vec::new(),
-		policy: PaperPolicy::Lfu,
+		policy:   PaperPolicy::Lfu,
 
 		max_connections: 0,
-		auth_token: None,
+		auth_token:      None,
 	}
 }
 
