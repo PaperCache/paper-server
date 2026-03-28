@@ -14,6 +14,9 @@ pub enum ServerError {
 	#[error(transparent)]
 	CacheError(#[from] CacheError),
 
+	#[error("internal error")]
+	Internal,
+
 	#[error("could not establish a connection")]
 	InvalidAddress,
 
@@ -69,7 +72,8 @@ fn get_error_code(error: &ServerError) -> u8 {
 	match error {
 		ServerError::CacheError(_) => 0,
 
-		ServerError::InvalidAddress
+		ServerError::Internal
+		| ServerError::InvalidAddress
 		| ServerError::InvalidConnection
 		| ServerError::InvalidCommand(_)
 		| ServerError::InvalidResponse

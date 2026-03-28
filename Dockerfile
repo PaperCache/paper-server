@@ -1,13 +1,14 @@
-FROM rust:1.88.0 AS builder
+FROM rust:1.94.1-slim-bookworm AS builder
 
-# the working directory inside the container
+RUN apt-get update && apt-get install -y build-essential
+
 WORKDIR /usr/src/paper
 
 COPY Cargo.toml Cargo.lock default.pconf log4rs.yaml ./
 COPY ./src ./src
 
-# create a release build
 RUN cargo build --release
+RUN cargo install paper-cli
 
 FROM debian:bookworm-slim
 

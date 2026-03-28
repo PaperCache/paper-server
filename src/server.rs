@@ -8,10 +8,12 @@
 use std::{
 	io::Write,
 	net::{Shutdown, TcpListener, TcpStream},
+	os::fd::AsRawFd,
 	str::FromStr,
 	sync::{
 		Arc,
-		atomic::{AtomicUsize, Ordering},
+		Mutex,
+		atomic::{AtomicBool, Ordering},
 	},
 };
 
@@ -35,8 +37,10 @@ pub struct Server {
 	pool: ThreadPool,
 
 	max_connections: usize,
-	num_connections: Arc<AtomicUsize>,
+	streams:         Arc<Mutex<Vec<Option<TcpStream>>>>,
 	auth_token:      Option<u64>,
+
+	shutdown: Arc<AtomicBool>,
 }
 
 impl Server {
@@ -47,6 +51,11 @@ impl Server {
 			return Err(ServerError::InvalidAddress);
 		};
 
+		let mut streams = Vec::with_capacity(config.max_connections());
+		for _ in 0..config.max_connections() {
+			streams.push(None);
+		}
+
 		let server = Server {
 			listener,
 			cache: Arc::new(cache),
@@ -54,18 +63,52 @@ impl Server {
 			pool: ThreadPool::new(config.max_connections()),
 
 			max_connections: config.max_connections(),
-			num_connections: Arc::new(AtomicUsize::new(0)),
+			streams: Arc::new(Mutex::new(streams)),
 			auth_token: config.auth_token(),
+
+			shutdown: Arc::new(AtomicBool::new(false)),
 		};
 
 		Ok(server)
 	}
 
-	pub fn listen(&mut self) -> Result<(), ServerError> {
+	pub fn shutdown(&self) -> Result<(), ServerError> {
+		self.shutdown.store(true, Ordering::Relaxed);
+
+		let streams = self
+			.streams
+			.lock()
+			.map_err(|_| ServerError::Internal)?;
+
+		for stream in streams.iter().flatten() {
+			stream
+				.shutdown(Shutdown::Both)
+				.map_err(|_| ServerError::Disconnected)?;
+		}
+
+		let fd = self.listener.as_raw_fd();
+		unsafe { libc::shutdown(fd, libc::SHUT_RD) };
+
+		Ok(())
+	}
+
+	pub fn listen(&self) -> Result<(), ServerError> {
 		for stream in self.listener.incoming() {
+			if self.shutdown.load(Ordering::Relaxed) {
+				if let Ok(stream) = stream {
+					let _ = stream.shutdown(Shutdown::Both);
+				}
+
+				return Ok(());
+			}
+
 			match stream {
 				Ok(mut stream) => {
-					if self.num_connections.load(Ordering::Relaxed) == self.max_connections {
+					let Ok(stream_handle) = stream.try_clone() else {
+						return Err(ServerError::InvalidConnection);
+					};
+
+					if count_active_streams(self.streams.clone())? == self.max_connections {
 						warn!("Maximum number of connections exceeded");
 
 						max_connections_reject_handshake(&mut stream)?;
@@ -85,14 +128,20 @@ impl Server {
 
 					let connection = Connection::new(stream, self.auth_token);
 					let cache = self.cache.clone();
-					let num_connections = Arc::clone(&self.num_connections);
+					let streams = self.streams.clone();
 
 					self.pool.execute(move || {
-						num_connections.fetch_add(1, Ordering::Relaxed);
-						Server::handle_connection(connection, cache);
+						let Some(index) = insert_stream(streams.clone(), stream_handle) else {
+							let _ = connection.close();
+							info!("Disconnected: {address}");
 
+							return;
+						};
+
+						Server::handle_connection(connection, cache);
 						info!("Disconnected: {address}");
-						num_connections.fetch_sub(1, Ordering::Relaxed);
+
+						remove_stream(streams, index);
 					});
 				},
 
@@ -107,7 +156,11 @@ impl Server {
 		loop {
 			let command = match connection.get_command() {
 				Ok(command) => command,
-				Err(ServerError::Disconnected) => return,
+
+				Err(ServerError::Disconnected) => {
+					let _ = connection.close();
+					return;
+				},
 
 				Err(err) => {
 					error!("{err}");
@@ -163,6 +216,46 @@ fn max_connections_reject_handshake(stream: &mut TcpStream) -> Result<(), Server
 	stream
 		.write_all(sheet.serialize())
 		.map_err(|_| ServerError::InvalidResponse)
+}
+
+fn count_active_streams(streams: Arc<Mutex<Vec<Option<TcpStream>>>>) -> Result<usize, ServerError> {
+	let streams = streams
+		.lock()
+		.map_err(|_| ServerError::Internal)?;
+
+	let num_active_streams = streams
+		.iter()
+		.filter(|maybe_stream| maybe_stream.is_some())
+		.count();
+
+	Ok(num_active_streams)
+}
+
+fn insert_stream(streams: Arc<Mutex<Vec<Option<TcpStream>>>>, stream: TcpStream) -> Option<usize> {
+	let mut streams = streams.lock().ok()?;
+
+	for (index, maybe_stream) in streams.iter_mut().enumerate() {
+		if maybe_stream.is_none() {
+			maybe_stream.replace(stream);
+			return Some(index);
+		}
+	}
+
+	None
+}
+
+fn remove_stream(streams: Arc<Mutex<Vec<Option<TcpStream>>>>, index: usize) {
+	let Ok(mut streams) = streams.lock() else {
+		return;
+	};
+
+	if index >= streams.len() {
+		return;
+	}
+
+	if let Some(stream) = streams[index].take() {
+		let _ = stream.shutdown(Shutdown::Both);
+	}
 }
 
 fn handle_ping() -> SheetResult {

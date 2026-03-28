@@ -8,7 +8,7 @@
 use std::{
 	hash::{DefaultHasher, Hash, Hasher},
 	io::Write,
-	net::TcpStream,
+	net::{Shutdown, TcpStream},
 };
 
 use paper_utils::stream::StreamError;
@@ -32,6 +32,12 @@ impl Connection {
 			auth_token,
 			is_authorized,
 		}
+	}
+
+	pub fn close(&self) -> Result<(), ServerError> {
+		self.stream
+			.shutdown(Shutdown::Both)
+			.map_err(|_| ServerError::Internal)
 	}
 
 	pub fn is_authorized(&self) -> bool {

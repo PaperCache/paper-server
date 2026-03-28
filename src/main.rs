@@ -12,11 +12,14 @@ mod error;
 mod logo;
 mod server;
 
-use std::path::{Path, PathBuf};
+use std::{
+	path::{Path, PathBuf},
+	sync::Arc,
+};
 
 use clap::Parser;
 use dotenv::dotenv;
-use log::error;
+use log::{error, info};
 #[cfg(not(target_env = "msvc"))]
 use tikv_jemallocator::Jemalloc;
 
@@ -65,10 +68,10 @@ fn main() {
 
 	let cache_version = cache.version();
 
-	let mut server = match Server::new(&config, cache) {
+	let server = match Server::new(&config, cache) {
 		Ok(server) => {
 			logo::print(&cache_version, config.port());
-			server
+			Arc::new(server)
 		},
 
 		Err(err) => {
@@ -77,8 +80,13 @@ fn main() {
 		},
 	};
 
+	init_ctrlc(server.clone());
+
 	loop {
-		let _ = server.listen();
+		if server.listen().is_ok() {
+			info!("Shutting down server...");
+			break;
+		}
 	}
 }
 
@@ -98,5 +106,15 @@ where
 
 			log4rs::init_raw_config(config).expect("Could not initialize log4rs");
 		},
+	}
+}
+
+fn init_ctrlc(server: Arc<Server>) {
+	let result = ctrlc::set_handler(move || {
+		let _ = server.shutdown();
+	});
+
+	if result.is_err() {
+		error!("Could not initailize ctrl-c handler");
 	}
 }
