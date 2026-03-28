@@ -15,6 +15,7 @@ FROM debian:bookworm-slim
 WORKDIR /usr/src/paper
 
 COPY --from=builder /usr/src/paper/target/release/paper-server ./
+COPY --from=builder /usr/local/cargo/bin/paper-cli /usr/bin/
 
 # run the server
 ENTRYPOINT ["/usr/src/paper/paper-server"]
